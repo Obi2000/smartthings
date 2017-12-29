@@ -109,13 +109,15 @@ def parse(String description) {
         def cluster = zigbee.parse(description)
 
         if (zigbeeMap?.clusterInt == COLOR_CONTROL_CLUSTER) {
-            if(zigbeeMap.attrInt == ATTRIBUTE_X){  //Hue Attribute
+            if(zigbeeMap.attrInt == ATTRIBUTE_X){  //Yxy X Attribute
                 state.X = zigbee.convertHexToInt(zigbeeMap.value) / 65536
-                runIn(5, updateColor, [overwrite: true])
+                state.colorXReported = true
+                updateColor()
             }
-            else if(zigbeeMap.attrInt == ATTRIBUTE_Y){ //Saturation Attribute
+            else if(zigbeeMap.attrInt == ATTRIBUTE_Y){ //Yxy Y Attribute
                 state.Y= zigbee.convertHexToInt(zigbeeMap.value) / 65536
-                runIn(5, updateColor, [overwrite: true])
+                state.colorYReported = true
+                updateColor()
             }
         }
         else if (cluster && cluster.clusterId == 0x0006 && cluster.command == 0x07) {
@@ -135,16 +137,24 @@ def parse(String description) {
 }
 
 def updateColor() {
-    def rgb = colorXy2Rgb(state.X, state.Y)
-//  log.debug  Math.round(rgb.red * 255).intValue()
-//  log.debug  Math.round(rgb.green * 255).intValue()
-//  log.debug  Math.round(rgb.blue * 255).intValue()
-    def hsv = colorRgb2Hsv(rgb.red, rgb.green, rgb.blue)
-    hsv.hue = Math.round(hsv.hue * 100).intValue()
-  	hsv.saturation = Math.round(hsv.saturation * 100).intValue()
-  	hsv.level = Math.round(hsv.level * 100).intValue()
-	sendEvent(name: "hue", value: hsv.hue, descriptionText: "Color has changed")
-	sendEvent(name: "saturation", value: hsv.saturation, descriptionText: "Color has changed", displayed: false)
+if (state.colorXReported == true  && state.colorYReported == true)
+	{
+    	state.colorXReported = false
+    	state.colorYReported = false
+
+		def rgb = colorXy2Rgb(state.X, state.Y)
+//	  log.debug  Math.round(rgb.red * 255).intValue()
+//	  log.debug  Math.round(rgb.green * 255).intValue()
+//	  log.debug  Math.round(rgb.blue * 255).intValue()
+	    def hsv = colorRgb2Hsv(rgb.red, rgb.green, rgb.blue)
+	    hsv.hue = Math.round(hsv.hue * 100).intValue()
+	  	hsv.saturation = Math.round(hsv.saturation * 100).intValue()
+	  	hsv.level = Math.round(hsv.level * 100).intValue()
+		sendEvent(name: "hue", value: hsv.hue, descriptionText: "Color has changed")
+		sendEvent(name: "saturation", value: hsv.saturation, descriptionText: "Color has changed", displayed: false)
+		
+        sendEvent(name: "colorName", value: getColorName(hsv.hue,hsv.saturation))
+	}
 }
 
 def on() {
@@ -162,6 +172,8 @@ def ping() {
 }
 
 def refresh() {
+  state.colorXReported = false
+  state.colorYReported = false
     zigbee.onOffRefresh() +
     zigbee.levelRefresh() +
     zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_COLOR_TEMPERATURE) +
@@ -242,7 +254,9 @@ def setColor(red, green, blue) {
 }
 
 def setColor(Map colorMap) {
-
+  state.colorXReported = false
+  state.colorYReported = false
+  
   logDebug "setColor: $colorMap"
  
   def rgb
@@ -469,4 +483,119 @@ def colorRgb2Hsv(r, g, b)
     logTrace "> Color HSV: ($h, $s, $v)"
     
     return [ hue: h, saturation: s, level: v ]
+}
+
+
+
+//input Hue Integer values; returns color name for saturation 100%
+private getColorName(hueValue,satValue){
+    if(hueValue>360 || hueValue<0)
+        return
+
+    hueValue = Math.round(hueValue / 100 * 360)
+
+ //   log.debug "hue value is $hueValue"
+
+    def colorName = "Color Mode"
+    if(satValue <= 10){
+        colorName = "White"
+    }
+    else if (hueValue>=301 && satValue <= 50){
+        colorName = "Pink"
+    }
+    else if (hueValue>=252 && hueValue <=256 && satValue <= 55){
+        colorName = "Lavender"
+    }
+    else if (hueValue>=327 && hueValue <=335  && satValue <= 59){
+        colorName = "Hot Pink"
+    }
+    else if (hueValue>=0 && hueValue <= 4){
+        colorName = "Red"
+    }
+    else if (hueValue>=5 && hueValue <=21 ){
+        colorName = "Brick Red"
+    }
+    else if (hueValue>=22 && hueValue <=30 ){
+        colorName = "Safety Orange"
+    }
+    else if (hueValue>=31 && hueValue <=34 ){
+        colorName = "Dark Orange"
+    }
+    else if (hueValue>=35 && hueValue <=40 ){
+        colorName = "Orange"
+    }
+    else if (hueValue>=41 && hueValue <=49 ){
+        colorName = "Amber"
+    }
+    else if (hueValue>=50 && hueValue <=56 ){
+        colorName = "Gold"
+    }
+    else if (hueValue>=57 && hueValue <=65 ){
+        colorName = "Yellow"
+    }
+    else if (hueValue>=66 && hueValue <=83 ){
+        colorName = "Electric Lime"
+    }
+    else if (hueValue>=84 && hueValue <=93 ){
+        colorName = "Lawn Green"
+    }
+    else if (hueValue>=94 && hueValue <=112 ){
+        colorName = "Bright Green"
+    }
+    else if (hueValue>=113 && hueValue <=135 ){
+        colorName = "Lime"
+    }
+    else if (hueValue>=136 && hueValue <=166 ){
+        colorName = "Spring Green"
+    }
+    else if (hueValue>=167 && hueValue <=171 ){
+        colorName = "Turquoise"
+    }
+    else if (hueValue>=172 && hueValue <=187 ){
+        colorName = "Aqua"
+    }
+    else if (hueValue>=188 && hueValue <=203 ){
+        colorName = "Sky Blue"
+    }
+    else if (hueValue>=204 && hueValue <=217 ){
+        colorName = "Dodger Blue"
+    }
+    else if (hueValue>=218 && hueValue <=223 ){
+        colorName = "Navy Blue"
+    }
+    else if (hueValue>=224 && hueValue <=251 ){
+        colorName = "Blue"
+    }
+    else if (hueValue>=252 && hueValue <=256 ){
+        colorName = "Han Purple"
+    }
+    else if (hueValue>=257 && hueValue <=274 ){
+        colorName = "Electric Indigo"
+    }
+    else if (hueValue>=275 && hueValue <=289 ){
+        colorName = "Electric Purple"
+    }
+    else if (hueValue>=290 && hueValue <=300 ){
+        colorName = "Orchid Purple"
+    }
+    else if (hueValue>=301 && hueValue <=315 ){
+        colorName = "Magenta"
+    }
+    else if (hueValue>=316 && hueValue <=326 ){
+        colorName = "Hot Pink"
+    }
+    else if (hueValue>=327 && hueValue <=335 ){
+        colorName = "Deep Pink"
+    }
+    else if (hueValue>=336 && hueValue <=339 ){
+        colorName = "Raspberry"
+    }
+    else if (hueValue>=340 && hueValue <=352 ){
+        colorName = "Crimson"
+    }
+    else if (hueValue>=353 && hueValue <=360 ){
+        colorName = "Red"
+    }
+
+    colorName
 }
