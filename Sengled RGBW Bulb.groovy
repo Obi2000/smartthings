@@ -71,6 +71,8 @@ metadata {
 //Globals
 private getATTRIBUTE_HUE() { 0x0000 }
 private getATTRIBUTE_SATURATION() { 0x0001 }
+private getATTRIBUTE_X() { 0x0003 }
+private getATTRIBUTE_Y() { 0x0004 }
 private getHUE_COMMAND() { 0x00 }
 private getSATURATION_COMMAND() { 0x03 }
 private getMOVE_TO_HUE_AND_SATURATION_COMMAND() { 0x06 }
@@ -84,6 +86,8 @@ def logDebug(msg) {
 def logTrace(msg) {
 	// log.trace msg
 }
+
+
 
 // Parse incoming device messages to generate events
 def parse(String description) {
@@ -105,12 +109,12 @@ def parse(String description) {
         def cluster = zigbee.parse(description)
 
         if (zigbeeMap?.clusterInt == COLOR_CONTROL_CLUSTER) {
-            if(zigbeeMap.attrInt == ATTRIBUTE_HUE){  //Hue Attribute
-                state.hueValue = Math.round(zigbee.convertHexToInt(zigbeeMap.value) / 0xfe * 100)
+            if(zigbeeMap.attrInt == ATTRIBUTE_X){  //Hue Attribute
+                state.X = zigbee.convertHexToInt(zigbeeMap.value) / 65536
                 runIn(5, updateColor, [overwrite: true])
             }
-            else if(zigbeeMap.attrInt == ATTRIBUTE_SATURATION){ //Saturation Attribute
-                state.saturationValue = Math.round(zigbee.convertHexToInt(zigbeeMap.value) / 0xfe * 100)
+            else if(zigbeeMap.attrInt == ATTRIBUTE_Y){ //Saturation Attribute
+                state.Y= zigbee.convertHexToInt(zigbeeMap.value) / 65536
                 runIn(5, updateColor, [overwrite: true])
             }
         }
@@ -131,8 +135,16 @@ def parse(String description) {
 }
 
 def updateColor() {
-	sendEvent(name: "hue", value: state.hueValue, descriptionText: "Color has changed")
-	sendEvent(name: "saturation", value: state.saturationValue, descriptionText: "Color has changed", displayed: false)
+    def rgb = colorXy2Rgb(state.X, state.Y)
+//  log.debug  Math.round(rgb.red * 255).intValue()
+//  log.debug  Math.round(rgb.green * 255).intValue()
+//  log.debug  Math.round(rgb.blue * 255).intValue()
+    def hsv = colorRgb2Hsv(rgb.red, rgb.green, rgb.blue)
+    hsv.hue = Math.round(hsv.hue * 100).intValue()
+  	hsv.saturation = Math.round(hsv.saturation * 100).intValue()
+  	hsv.level = Math.round(hsv.level * 100).intValue()
+	sendEvent(name: "hue", value: hsv.hue, descriptionText: "Color has changed")
+	sendEvent(name: "saturation", value: hsv.saturation, descriptionText: "Color has changed", displayed: false)
 }
 
 def on() {
@@ -153,8 +165,8 @@ def refresh() {
     zigbee.onOffRefresh() +
     zigbee.levelRefresh() +
     zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_COLOR_TEMPERATURE) +
-    zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_HUE) +
-    zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_SATURATION) +
+    zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_X) +
+    zigbee.readAttribute(COLOR_CONTROL_CLUSTER, ATTRIBUTE_Y) +
     zigbee.onOffConfig(0, 300) +
     zigbee.levelConfig()
 }
@@ -224,7 +236,9 @@ def setColor(red, green, blue) {
   def strX = DataType.pack(intX, DataType.UINT16, 1);
   def strY = DataType.pack(intY, DataType.UINT16, 1);
   
-  zigbee.command(0x0300, 0x07, strX, strY, "0a00")
+  zigbee.command(0x0300, 0x07, strX, strY, "0a00")+
+  zigbee.readAttribute(COLOR_CONTROL_CLUSTER, 0x0003) +
+  zigbee.readAttribute(COLOR_CONTROL_CLUSTER, 0x0004) 
 }
 
 def setColor(Map colorMap) {
@@ -359,4 +373,100 @@ def colorHsv2Rgb(h, s) {
 	logTrace "< Color RGB: ($r, $g, $b)"
   
 	[red: r, green: g, blue: b]
+}
+
+
+
+
+def colorXy2Rgb(cordx, cordy) {
+
+//  log.debug "< Color xy: ($cordx, $cordy)"
+  
+  def Y = 1;
+  def X = (Y / cordy) * cordx;
+  def Z = (Y / cordy) * (1.0 - cordx - cordy);  
+
+//  log.debug "< Color XYZ: ($X, $Y, $Z)"
+
+  
+  
+  
+  // sRGB, Reference White D65
+def M = [
+	[	1.6117568186730657,		-0.2028048928758147,	-0.30229771656510396],
+	[	-0.5090571453688465,	1.4119135834154535,		0.06607044440522163],
+	[	0.02608630169714719,	-0.07235259153584557,	0.9620860940411118]
+]
+
+  def r = X * M[0][0] + Y * M[0][1] + Z * M[0][2]
+  def g = X * M[1][0] + Y * M[1][1] + Z * M[1][2]
+  def b = X * M[2][0] + Y * M[2][1] + Z * M[2][2]
+
+  def max = max(r, g, b)
+  r = colorGammaRevert(r / max)
+  g = colorGammaRevert(g / max)
+  b = colorGammaRevert(b / max)
+  
+  logTrace "< Color RGB: ($r, $g, $b)"
+  
+  [red: r, green: g, blue: b]
+}
+
+
+
+def min(first, ... rest) {
+  def min = first;
+  for(next in rest) {
+    if(next < min) min = next
+  }
+  
+  min
+}
+
+def max(first, ... rest) {
+  def max = first;
+  for(next in rest) {
+    if(next > max) max = next
+  }
+  
+  max
+}
+
+
+
+def colorGammaRevert(component) {
+  return (component <= 0.0031308) ? 12.92 * component : (1.0 + 0.055) * Math.pow(component, (1.0 / 2.4)) - 0.055;
+}
+
+
+
+def colorRgb2Hsv(r, g, b)
+{
+	logTrace "> Color RGB: ($r, $g, $b)"
+  
+	def min = min(r, g, b)
+	def max = max(r, g, b)
+	def delta = max - min
+    
+    def h
+    def s
+    def v = max
+
+    if (delta == 0) {
+    	h = 0
+        s = 0
+    }
+    else {
+		s = delta / max
+        if (r == max) h = ( g - b ) / delta			// between yellow & magenta
+		else if(g == max) h = 2 + ( b - r ) / delta	// between cyan & yellow
+		else h = 4 + ( r - g ) / delta				// between magenta & cyan
+        h /= 6
+
+		if(h < 0) h += 1
+    }
+
+    logTrace "> Color HSV: ($h, $s, $v)"
+    
+    return [ hue: h, saturation: s, level: v ]
 }
